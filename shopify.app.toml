@@ -1,0 +1,36 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "5344134f5fc6889fae62ddacc4ce8e39"
+name = "bulkify"
+handle = "bulkify-14"
+application_url = "https://xi-wellness-eddie-pencil.trycloudflare.com"
+embedded = true
+
+[build]
+include_config_on_deploy = true
+automatically_update_urls_on_dev = true
+
+[webhooks]
+api_version = "2025-07"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "write_products"
+
+[auth]
+redirect_urls = [
+  "https://xi-wellness-eddie-pencil.trycloudflare.com/auth/callback",
+  "https://xi-wellness-eddie-pencil.trycloudflare.com/auth/shopify/callback",
+  "https://xi-wellness-eddie-pencil.trycloudflare.com/api/auth/callback"
+]
+
+[pos]
+embedded = false
