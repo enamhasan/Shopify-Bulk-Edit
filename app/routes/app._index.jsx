@@ -14,6 +14,7 @@ import {
   Spinner,
 } from '@shopify/polaris';
 import {useLoaderData, useSubmit} from '@remix-run/react';
+
 import {json} from '@remix-run/node';
 import {authenticate} from '../shopify.server';
 import {useState} from 'react';
@@ -107,11 +108,13 @@ export default function Products() {
       title="Products"
       primaryAction={
         <Button
-          onClick={handleBulkEdit}
-          disabled={selectedResources.length === 0}
-        >
-          Bulk Edit Price
-        </Button>
+  url={`/app/bulk-edit?ids=${selectedProducts
+    .map((p) => encodeURIComponent(p.id))
+    .join(',')}`}
+  disabled={selectedResources.length === 0}
+>
+  Bulk Edit Price
+</Button>
       }
     >
       <Card>

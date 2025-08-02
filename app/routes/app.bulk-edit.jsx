@@ -1,41 +1,36 @@
-// app/routes/products.jsx
 import {
-  Card,
-  IndexTable,
   Page,
-  Text,
-  Filters,
+  Card,
   TextField,
   Select,
   Button,
-  Badge,
-  useIndexResourceState,
-  Spinner,
+  IndexTable,
+  Text,
+  InlineStack,
+  Box,
+  Divider,
 } from '@shopify/polaris';
-import { useEffect, useState } from 'react';
-import { json, useLoaderData } from '@remix-run/react';
-import { authenticate } from '../shopify.server';
+import {useLoaderData, useNavigate} from '@remix-run/react';
+import {json} from '@remix-run/node';
+import {authenticate} from '../shopify.server';
+import {useEffect, useMemo, useState} from 'react';
 
-export const loader = async ({ request }) => {
-  const { admin } = await authenticate.admin(request);
+export const loader = async ({request}) => {
+  const {admin} = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const ids = url.searchParams.get('ids')?.split(',') || [];
 
   const query = `
-    {
-      products(first: 50) {
-        edges {
-          node {
-            id
-            title
-            tags
-            productType
-            totalInventory
-            vendor
-            variants(first: 1) {
-              edges {
-                node {
-                  id
-                  price
-                }
+    query {
+      nodes(ids: [${ids.map((id) => `"${id}"`).join(',')}]) {
+        ... on Product {
+          id
+          title
+          variants(first: 1) {
+            edges {
+              node {
+                id
+                price
               }
             }
           }
@@ -45,150 +40,143 @@ export const loader = async ({ request }) => {
   `;
 
   const response = await admin.graphql(query);
-  const data = await response.json();
+  const result = await response.json();
 
-  const products = data.data.products.edges.map(({ node }) => ({
-    id: node.id,
-    title: node.title,
-    tags: node.tags,
-    productType: node.productType,
-    vendor: node.vendor,
-    inventory: node.totalInventory,
-    variantId: node.variants.edges[0]?.node?.id || null,
-    price: node.variants.edges[0]?.node?.price || 'N/A',
+  const products = result.data.nodes.map((product) => ({
+    id: product.id,
+    title: product.title,
+    price: parseFloat(product.variants.edges[0].node.price),
+    variantId: product.variants.edges[0].node.id,
   }));
 
-  return json({ products });
+  return json({products});
 };
 
-export default function ProductList() {
-  const { products: initialProducts } = useLoaderData();
-  const [products, setProducts] = useState(initialProducts);
-  const [queryValue, setQueryValue] = useState('');
-  const [tagFilter, setTagFilter] = useState('');
-  const [typeFilter, setTypeFilter] = useState('');
-  const [sortDirection, setSortDirection] = useState('asc');
-  const { selectedResources, allResourcesSelected, handleSelectionChange } =
-    useIndexResourceState(products);
+export default function BulkEditPage() {
+  const {products} = useLoaderData();
+  const navigate = useNavigate();
 
-  const handleFiltersClearAll = () => {
-    setQueryValue('');
-    setTagFilter('');
-    setTypeFilter('');
-  };
+  const [editType, setEditType] = useState('percent');
+  const [amount, setAmount] = useState('10');
+  const [isIncreasing, setIsIncreasing] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  const handleQueryChange = (value) => setQueryValue(value);
-  const handleTagChange = (value) => setTagFilter(value);
-  const handleTypeChange = (value) => setTypeFilter(value);
-  const toggleSortDirection = () =>
-    setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+  const editedProducts = useMemo(() => {
+    const amt = parseFloat(amount);
+    return products.map((p) => {
+      let newPrice = p.price;
+      if (editType === 'percent') {
+        newPrice = isIncreasing
+          ? p.price * (1 + amt / 100)
+          : p.price * (1 - amt / 100);
+      } else {
+        newPrice = isIncreasing ? p.price + amt : p.price - amt;
+      }
+      return {...p, newPrice: newPrice.toFixed(2)};
+    });
+  }, [products, amount, editType, isIncreasing]);
 
-  const filteredProducts = products
-    .filter((product) =>
-      product.title.toLowerCase().includes(queryValue.toLowerCase())
-    )
-    .filter((product) =>
-      tagFilter ? product.tags.includes(tagFilter) : true
-    )
-    .filter((product) =>
-      typeFilter ? product.productType === typeFilter : true
-    )
-    .sort((a, b) =>
-      sortDirection === 'asc'
-        ? a.title.localeCompare(b.title)
-        : b.title.localeCompare(a.title)
+  const handleRunEdit = async () => {
+    setLoading(true);
+    await Promise.all(
+      editedProducts.map((product) =>
+        fetch('/app/api/update-price', {
+          method: 'POST',
+          body: JSON.stringify({
+            variantId: product.variantId,
+            newPrice: product.newPrice,
+          }),
+          headers: {'Content-Type': 'application/json'},
+        }),
+      ),
     );
-
-  const rowMarkup = filteredProducts.map(
-    ({ id, title, productType, tags, price, inventory }, index) => (
-      <IndexTable.Row
-        id={id}
-        key={id}
-        selected={selectedResources.includes(id)}
-        position={index}
-      >
-        <IndexTable.Cell>{title}</IndexTable.Cell>
-        <IndexTable.Cell>{productType}</IndexTable.Cell>
-        <IndexTable.Cell>
-          {tags.map((tag) => (
-            <Badge key={tag}>{tag}</Badge>
-          ))}
-        </IndexTable.Cell>
-        <IndexTable.Cell>{price}</IndexTable.Cell>
-        <IndexTable.Cell>{inventory}</IndexTable.Cell>
-      </IndexTable.Row>
-    )
-  );
-
-  const filters = [
-    {
-      key: 'tagFilter',
-      label: 'Tag',
-      filter: (
-        <TextField
-          label="Tag"
-          value={tagFilter}
-          onChange={handleTagChange}
-          autoComplete="off"
-          labelHidden
-        />
-      ),
-      shortcut: true,
-    },
-    {
-      key: 'typeFilter',
-      label: 'Product type',
-      filter: (
-        <TextField
-          label="Type"
-          value={typeFilter}
-          onChange={handleTypeChange}
-          autoComplete="off"
-          labelHidden
-        />
-      ),
-      shortcut: true,
-    },
-  ];
+    setLoading(false);
+    navigate('/app');
+  };  
 
   return (
     <Page
-      title="Products"
+      title="Configure modifications"
       primaryAction={{
-        content: 'Bulk Update Price',
-        onAction: () => {
-          console.log('Selected:', selectedResources);
-          // Next step: Navigate to price update page or open modal
-        },
-        disabled: selectedResources.length === 0,
+        content: loading ? 'Updating...' : 'Run Edit',
+        onAction: handleRunEdit,
+        disabled: loading,
       }}
+      secondaryActions={[
+        {content: 'Back to Products', url: '/app'},
+      ]}
     >
       <Card>
-        <div style={{ padding: '1rem' }}>
-          <Filters
-            queryValue={queryValue}
-            filters={filters}
-            onQueryChange={handleQueryChange}
-            onClearAll={handleFiltersClearAll}
-          />
-        </div>
+        <Box paddingBlockEnd="400">
+          <Text variant="headingMd" as="h2">
+            Price
+          </Text>
+        </Box>
 
+        <InlineStack gap="400" wrap={false}>
+          <TextField label="Field to edit" value="Price" disabled />
+          <Select
+            label="How to edit"
+            options={[
+              {label: 'Increase by percent', value: 'percent'},
+              {label: 'Decrease by percent', value: 'percent-decrease'},
+              {label: 'Increase by amount', value: 'amount'},
+              {label: 'Decrease by amount', value: 'amount-decrease'},
+            ]}
+            onChange={(val) => {
+              setEditType(val.includes('percent') ? 'percent' : 'amount');
+              setIsIncreasing(!val.includes('decrease'));
+            }}
+            value={
+              isIncreasing
+                ? editType === 'percent'
+                  ? 'percent'
+                  : 'amount'
+                : editType === 'percent'
+                  ? 'percent-decrease'
+                  : 'amount-decrease'
+            }
+          />
+          <TextField
+            label={
+              editType === 'percent'
+                ? `${isIncreasing ? 'Increase' : 'Decrease'} by %`
+                : `${isIncreasing ? 'Increase' : 'Decrease'} by amount`
+            }
+            value={amount}
+            type="number"
+            onChange={setAmount}
+            suffix={editType === 'percent' ? '%' : '$'}
+          />
+        </InlineStack>
+      </Card>
+
+      <Divider />
+
+      <Card title={`Previewing ${editedProducts.length} products`}>
         <IndexTable
-          resourceName={{ singular: 'product', plural: 'products' }}
-          itemCount={filteredProducts.length}
-          selectedItemsCount={
-            allResourcesSelected ? 'All' : selectedResources.length
-          }
-          onSelectionChange={handleSelectionChange}
+          resourceName={{singular: 'product', plural: 'products'}}
+          itemCount={editedProducts.length}
           headings={[
-            { title: 'Title', isSortable: true },
-            { title: 'Type' },
-            { title: 'Tags' },
-            { title: 'Price' },
-            { title: 'Inventory' },
+            {title: 'Product'},
+            {title: 'Original Price'},
+            {title: 'New Price'},
           ]}
+          selectable={false}
         >
-          {rowMarkup}
+          {editedProducts.map(({id, title, price, newPrice}, index) => (
+            <IndexTable.Row id={id} key={id} position={index}>
+              <IndexTable.Cell>{title}</IndexTable.Cell>
+              <IndexTable.Cell>
+                <Text as="span" tone="subdued" lineThrough>
+                  ${price}
+                </Text>
+              </IndexTable.Cell>
+              <IndexTable.Cell>
+                <Text as="span">${newPrice}</Text>
+              </IndexTable.Cell>
+            </IndexTable.Row>
+          ))}
         </IndexTable>
       </Card>
     </Page>
